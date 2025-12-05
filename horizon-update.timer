@@ -1,0 +1,11 @@
+[Unit]
+Description=HorizonSec Auto-Update Timer
+Requires=horizon-update.service
+
+[Timer]
+OnBootSec=2s
+OnUnitActiveSec=1d
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
