@@ -323,30 +323,25 @@ def select_disk():
             error("Invalid selection")
 
 def partition_disk(disk_name, disk_path, is_uefi):
-    """Partition and format disk - FIXED VERSION"""
+    """Partition and format disk"""
     header("Disk Partitioning")
     
     info("Unmounting any existing partitions...")
+    cmd("umount -R /mnt", check=False)
     cmd("swapoff -a", check=False)
-    cmd("umount -R /mnt 2>/dev/null", check=False)
     
     # Unmount all partitions on the target disk
-    disk_base = disk_name.replace('/dev/', '')
-    time.sleep(1)
-    part_pattern = f"{disk_base}[p]?[0-9]+"
-    part_list = cmd(f"lsblk -ln -o NAME /dev/{disk_base} | tail -n +2", capture=True, check=False)
+    disk_base = disk_name.split('/')[-1]
+    part_list = cmd(f"lsblk -ln -o NAME {disk_path} | grep -E '^{disk_base}[0-9]+'", capture=True, check=False)
     if part_list and isinstance(part_list, str):
         for part in part_list.split():
-            part = part.strip()
-            if part and part != disk_base:
-                cmd(f"umount -f /dev/{part} 2>/dev/null", check=False)
-    
-    time.sleep(1)
+            cmd(f"umount /dev/{part}", check=False)
     
     info("Wiping disk completely...")
-    cmd(f"wipefs -af {disk_path}", check=False)
     cmd(f"sgdisk --zap-all {disk_path}", check=False)
-    cmd(f"dd if=/dev/zero of={disk_path} bs=1M count=10 conv=fsync", check=False)
+    cmd(f"wipefs -af {disk_path}", check=False)
+    cmd(f"dd if=/dev/zero of={disk_path} bs=1M count=1", check=False)
+    cmd("sync")
     
     # Force kernel to re-read partition table
     cmd(f"partprobe {disk_path}", check=False)
@@ -369,16 +364,6 @@ def partition_disk(disk_name, disk_path, is_uefi):
         swap = f"{disk_path}{sep}2"
         root = f"{disk_path}{sep}3"
         
-        # Wait for device nodes
-        for dev in [efi, swap, root]:
-            timeout = 10
-            while not os.path.exists(dev) and timeout > 0:
-                time.sleep(1)
-                timeout -= 1
-            if not os.path.exists(dev):
-                error(f"Partition {dev} not found after creation!")
-                sys.exit(1)
-        
         info("Formatting partitions...")
         cmd(f"mkfs.fat -F32 {efi}")
         cmd(f"mkswap {swap}")
@@ -386,8 +371,8 @@ def partition_disk(disk_name, disk_path, is_uefi):
         
         info("Mounting filesystems...")
         cmd(f"mount {root} /mnt")
-        cmd("mkdir -p /mnt/boot/efi")
-        cmd(f"mount {efi} /mnt/boot/efi")
+        cmd("mkdir -p /mnt/boot")
+        cmd(f"mount {efi} /mnt/boot")
         cmd(f"swapon {swap}")
     else:
         info("Creating MBR partition table (BIOS)...")
@@ -396,9 +381,6 @@ def partition_disk(disk_name, disk_path, is_uefi):
         cmd(f"sgdisk -n 2:0:+8G -t 2:8200 -c 2:SWAP {disk_path}")
         cmd(f"sgdisk -n 3:0:0 -t 3:8300 -c 3:ROOT {disk_path}")
         
-        # Set legacy BIOS bootable flag
-        cmd(f"sgdisk -A 1:set:2 {disk_path}")
-        
         cmd(f"partprobe {disk_path}", check=False)
         time.sleep(3)
 
@@ -406,16 +388,6 @@ def partition_disk(disk_name, disk_path, is_uefi):
         swap = f"{disk_path}{sep}2"
         root = f"{disk_path}{sep}3"
         efi = boot
-        
-        # Wait for device nodes
-        for dev in [boot, swap, root]:
-            timeout = 10
-            while not os.path.exists(dev) and timeout > 0:
-                time.sleep(1)
-                timeout -= 1
-            if not os.path.exists(dev):
-                error(f"Partition {dev} not found after creation!")
-                sys.exit(1)
 
         info("Formatting partitions...")
         cmd(f"mkfs.ext4 -F {boot}")
@@ -483,9 +455,9 @@ def select_desktop(desktops, recommended='1', lite_mode=False):
         error("Invalid choice")
 
 def create_install_script(username, password, root_password, desktop, gpu_drivers, ghost_mode, is_uefi, disk_path, hostname, timezone, ssh_config, firewall_config, install_type='full', gpu_name='Generic'):
-    """Generate the chroot installation script - FIXED VERSION"""
+    """Generate chroot installation script"""
     
-    # System packages with docker properly included
+    # Define system packages based on installation type
     if install_type == 'lite':
         system_pkgs = [
             "alacritty", "fastfetch", "htop",
@@ -501,6 +473,27 @@ def create_install_script(username, password, root_password, desktop, gpu_driver
             "docker", "docker-buildx",
             "git", "gcc", "make", "pkg-config",
             "python", "python-pip"
+        ]
+    else:
+        system_pkgs = [
+            "alacritty",
+            "fastfetch", "htop",
+            "ranger", "thunar", "gvfs", "gvfs-mtp",
+            "zsh", "zsh-completions", "zsh-syntax-highlighting",
+            "fzf", "ripgrep", "fd", "bat", "tmux",
+            "ttf-jetbrains-mono-nerd", "ttf-firacode-nerd", "ttf-hack-nerd",
+            "ttf-meslo-nerd", "ttf-sourcecodepro-nerd",
+            "noto-fonts", "noto-fonts-emoji", "noto-fonts-cjk",
+            "p7zip", "unzip", "unrar", "zip", "tar", "gzip",
+            "ntfs-3g", "dosfstools", "exfat-utils", "e2fsprogs",
+            "wget", "curl", "rsync", "openssh",
+            "ufw", "fail2ban",
+            "code", "vim", "neovim",
+            "docker", "docker-compose", "qemu-full", "virt-manager",
+            "git", "gcc", "make", "cmake", "pkg-config",
+            "perl", "ruby", "python", "python-pip",
+            "gdb", "lldb", "valgrind",
+            "flatpak", "libadwaita-without-adwaita"
         ]
     else:
         system_pkgs = [
@@ -520,6 +513,413 @@ def create_install_script(username, password, root_password, desktop, gpu_driver
         ]
     
     # Penetration testing packages
+    if install_type == 'lite':
+        pentest_pkgs = [
+            # Network Scanning & Enumeration (25)
+            "nmap", "masscan", "netdiscover", "arp-scan", "arping",
+            "dnsenum", "fierce", "dmitry", "enum4linux", "nbtscan",
+            "theharvester", "traceroute", "whois", "ncat", "hping",
+            "unicornscan", "netmask", "mtr", "p0f", "netcat",
+            "iperf3", "nethogs", "nload", "iftop", "vnstat",
+            
+            # Web Application Testing (20)
+            "nikto", "sqlmap", "wpscan", "dirb", "gobuster",
+            "ffuf", "whatweb", "wafw00f", "burpsuite", "zaproxy",
+            "commix", "wfuzz", "skipfish", "sqlitebrowser", "testssl.sh",
+            "sslscan", "httpie", "curl", "wget", "arjun",
+            
+            # Wireless Security (15)
+            "aircrack-ng", "reaver", "bully", "pixiewps", "wifite",
+            "kismet", "mdk4", "mdk3", "hostapd", "dnsmasq",
+            "cowpatty", "rfkill", "macchanger", "airodump-ng", "aireplay-ng",
+            
+            # Password Cracking (15)
+            "john", "hashcat", "hydra", "medusa", "ncrack",
+            "ophcrack", "hashid", "crunch", "cewl", "cupp",
+            "hash-identifier", "findmyhash", "hashdeep", "pdfcrack", "crowbar",
+            
+            # Exploitation & Frameworks (12)
+            "metasploit", "exploitdb", "searchsploit", "crackmapexec",
+            "impacket", "routersploit", "shellnoob", "veil", "beef",
+            "armitage", "msfvenom", "msfconsole",
+            
+            # Network Analysis & MITM (18)
+            "wireshark-qt", "wireshark-cli", "tcpdump", "ettercap", "bettercap",
+            "mitmproxy", "dsniff", "responder", "arpspoof", "tshark",
+            "ngrep", "scapy", "sslstrip", "dnschef", "yersinia",
+            "ratproxy", "mitm6", "ntlmrelayx",
+            
+            # Reverse Engineering & Binary Analysis (15)
+            "ghidra", "radare2", "binwalk", "strings", "hexedit",
+            "objdump", "readelf", "nm", "strace", "ltrace",
+            "hexdump", "xxd", "binutils", "gdb", "pwndbg",
+            
+            # Forensics & Data Recovery (12)
+            "sleuthkit", "foremost", "autopsy", "volatility", "steghide",
+            "exiftool", "dc3dd", "ddrescue", "testdisk", "extundelete",
+            "scalpel", "bulk-extractor",
+            
+            # Security Auditing & Hardening (12)
+            "lynis", "openvas", "rkhunter", "chkrootkit", "aide",
+            "apparmor", "logwatch", "tiger", "checksec", "audit",
+            "osquery", "tripwire",
+            
+            # Encryption & Privacy (10)
+            "veracrypt", "gnupg", "openssl", "tomb", "cryptsetup",
+            "openvpn", "wireguard-tools", "tor", "torsocks", "proxychains-ng",
+            
+            # Vulnerability Scanning (8)
+            "openvas", "nikto", "wapiti", "skipfish", "nuclei",
+            "nessus", "nexpose", "qualysguard",
+            
+            # Sniffing & Spoofing (8)
+            "wireshark-qt", "tcpdump", "dsniff", "ettercap", "bettercap",
+            "arpspoof", "macchanger", "responder"
+        ]
+    else:
+        pentest_pkgs = [
+            # Network Scanning & Enumeration (30)
+            "nmap", "masscan", "netdiscover", "arp-scan", "arping",
+            "dnsenum", "fierce", "dmitry", "enum4linux", "nbtscan",
+            "theharvester", "ike-scan", "unicornscan", "hping",
+            "traceroute", "whois", "ncat", "netmask", "mtr",
+            "p0f", "netcat", "netperf", "iperf3", "nethogs",
+            "nload", "iftop", "vnstat", "ss", "lsof", "fuser",
+            
+            # Web Application Testing (25)
+            "nikto", "sqlmap", "wpscan", "dirb", "gobuster",
+            "ffuf", "whatweb", "wafw00f", "burpsuite", "zaproxy",
+            "commix", "wfuzz", "skipfish", "sqlitebrowser", "nuclei",
+            "testssl.sh", "sslscan", "jwt-cli", "httpie", "curl",
+            "wget", "arjun", "katana", "httpx", "waymore",
+            
+            # Wireless Security (15)
+            "aircrack-ng", "reaver", "bully", "pixiewps", "wifite",
+            "kismet", "mdk4", "mdk3", "hostapd", "dnsmasq",
+            "cowpatty", "airmon-ng", "wifipumpkin3", "rfkill", "rtl-sdr",
+            
+            # Password Cracking (15)
+            "john", "hashcat", "hydra", "medusa", "ncrack",
+            "ophcrack", "hashid", "crunch", "cewl", "cupp",
+            "hash-identifier", "findmyhash", "hashdeep", "pdfcrack", "crowbar",
+            
+            # Exploitation & Frameworks (10)
+            "metasploit", "exploitdb", "searchsploit", "crackmapexec",
+            "impacket", "routersploit", "setoolkit", "powersploit",
+            "empire", "covenant",
+            
+            # Network Analysis (20)
+            "wireshark-qt", "tcpdump", "ettercap", "bettercap",
+            "mitmproxy", "dsniff", "responder", "arpspoof", "tshark",
+            "ngrep", "scapy", "hping", "fragroute", "macchanger",
+            "ratproxy", "sslstrip", "dnschef", "yersinia", "lbd", "wafw00f",
+            
+            # Reverse Engineering & Forensics (25)
+            "ghidra", "radare2", "binwalk", "strings", "hexedit",
+            "sleuthkit", "foremost", "autopsy", "volatility", "volatility3",
+            "steghide", "exiftool", "dc3dd", "ddrescue", "testdisk",
+            "extundelete", "scalpel", "exifprobe", "hexinject", "objdump",
+            "readelf", "nm", "strace", "ltrace", "bokken",
+            
+            # System Analysis & Debugging (15)
+            "gdb", "lldb", "valgrind", "perf", "bpftrace",
+            "sysstat", "iotop", "hardinfo", "inxi", "procps-ng",
+            "psmisc", "audit", "osquery", "cppcheck", "clang-tools-extra",
+            
+            # Security Auditing (20)
+            "lynis", "openvas", "rkhunter", "chkrootkit", "aide",
+            "apparmor", "logwatch", "fail2ban", "ufw", "iptables",
+            "nftables", "clamav", "clamav-daemon", "yara", "python-yara",
+            "ssh-audit", "checksec", "tiger", "nikto", "openscap",
+            
+            # Encryption & Privacy (15)
+            "veracrypt", "gnupg", "openssl", "tomb", "cryptsetup",
+            "openvpn", "wireguard-tools", "openfortivpn", "strongswan",
+            "xl2tpd", "tor", "torsocks", "proxychains-ng", "privoxy", "i2pd",
+            
+            # Mobile & IoT (10)
+            "apktool", "apksigner", "jadx", "frida", "objection",
+            "androguard", "dex2jar", "smali", "adb", "fastboot",
+            
+            # Cloud & Container Security (10)
+            "docker", "docker-compose", "kubectl", "helm", "trivy",
+            "prowler", "scout", "cloudsploit", "pacu", "weirdaaa",
+            
+            # Social Engineering (5)
+            "setoolkit", "gophish", "evilginx2", "modlishka", "beef",
+            
+            # Utilities & Misc (30)
+            "macchanger", "proxychains-ng", "bleachbit", "socat",
+            "netcat", "iperf3", "jq", "exiftool", "upx",
+            "redsocks", "udptunnel", "iodine", "dns2tcp", "ptunnel",
+            "stunnel", "udp2raw", "chisel", "ligolo", "pwncat",
+            "evil-winrm", "bloodhound", "neo4j", "pypykatz", "sprayhound",
+            "kerbrute", "rubeus", "mimikatz", "lazagne", "keepass2john"
+        ]
+    
+    # SSH key generation commands
+    ssh_gen_keys = ""
+    if ssh_config.get('enabled') and ssh_config.get('generate_keys'):
+        ssh_gen_keys = f"mkdir -p /home/{username}/.ssh && chmod 700 /home/{username}/.ssh\nsudo -u {username} ssh-keygen -t ed25519 -f /home/{username}/.ssh/id_ed25519 -N '' -q 2>/dev/null || true"
+    
+    # Build the install script
+    system_pkgs_str = ' '.join(system_pkgs)
+    gpu_drivers_str = ' '.join(gpu_drivers)
+    desktop_packages_str = ' '.join(desktop['packages'])
+    desktop_portal_str = desktop['portal']
+    desktop_dm_str = desktop['dm']
+    desktop_name_str = desktop['name']
+    
+    pentest_batch1 = ' '.join(pentest_pkgs[:50]) if len(pentest_pkgs) > 0 else ""
+    pentest_batch2 = ' '.join(pentest_pkgs[50:100]) if len(pentest_pkgs) > 50 else ""
+    pentest_batch3 = ' '.join(pentest_pkgs[100:]) if len(pentest_pkgs) > 100 else ""
+    
+    tor_install = "pacman -S --noconfirm --needed tor torsocks > /dev/null 2>&1 || true" if ghost_mode else ""
+    ssh_enable = "systemctl enable sshd > /dev/null 2>&1" if ssh_config.get('enabled') else ""
+    firewall_ssh = "ufw allow 22/tcp > /dev/null 2>&1" if firewall_config.get('ssh', True) else ""
+    
+    script = f"""#!/bin/bash
+set -e
+
+printf "\\033[38;5;208m╔══════════════════════════════════════════════════════════════════╗\\033[0m\\n"
+printf "\\033[38;5;208m║ \\033[1m%-66s \\033[38;5;208m║\\033[0m\\n" "HORIZONSEC SYSTEM CONFIGURATION"
+printf "\\033[38;5;208m╚══════════════════════════════════════════════════════════════════╝\\033[0m\\n"
+
+# Timezone & Locale
+printf "\\033[96m[1/10]\\033[0m Setting timezone and locale...\\n"
+ln -sf /usr/share/zoneinfo/{timezone} /etc/localtime
+hwclock --systohc
+echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
+locale-gen
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
+
+# Hostname
+echo "{hostname}" > /etc/hostname
+cat > /etc/hosts <<'HOSTEOF'
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   {hostname}.localdomain {hostname}
+HOSTEOF
+
+# Root password
+echo "root:{root_password}" | chpasswd
+
+# Enable multilib
+sed -i '/\\[multilib\\]/,/Include/s/^#//' /etc/pacman.conf
+pacman -Sy --noconfirm > /dev/null 2>&1
+
+printf "\\033[96m[2/10]\\033[0m Installing system packages...\\n"
+pacman -S --noconfirm --needed {system_pkgs_str} > /dev/null 2>&1 || true
+
+printf "\\033[96m[3/10]\\033[0m Installing GPU drivers ({gpu_name})...\\n"
+pacman -S --noconfirm --needed {gpu_drivers_str} > /dev/null 2>&1 || true
+
+printf "\\033[96m[4/10]\\033[0m Installing desktop environment ({desktop_name_str})...\\n"
+pacman -S --noconfirm --needed {desktop_packages_str} {desktop_portal_str} > /dev/null 2>&1 || true
+
+printf "\\033[96m[5/10]\\033[0m Installing penetration testing tools...\\n"
+pacman -S --noconfirm --needed {pentest_batch1} > /dev/null 2>&1 || true
+"""
+    
+    if pentest_batch2:
+        script += f"pacman -S --noconfirm --needed {pentest_batch2} > /dev/null 2>&1 || true\n"
+    
+    if pentest_batch3:
+        script += f"pacman -S --noconfirm --needed {pentest_batch3} > /dev/null 2>&1 || true\n"
+    
+    script += f"""
+{tor_install}
+
+printf "\\033[96m[6/10]\\033[0m Creating user account and groups...\\n"
+
+# Ensure docker group exists
+groupadd -f docker
+
+if id "{username}" &>/dev/null; then
+    echo "User {username} already exists"
+    usermod -aG wheel,docker {username}
+else
+    useradd -m -G wheel,docker -s /bin/zsh {username}
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to create user {username}"
+        exit 1
+    fi
+fi
+
+echo "{username}:{password}" | chpasswd
+sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
+
+printf "\\033[96m[7/10]\\033[0m Configuring bootloader...\\n"
+
+# Get root partition UUID
+ROOT_PART=$(df / | tail -1 | awk '{{print $1}}')
+ROOT_UUID=$(blkid -s UUID -o value $ROOT_PART)
+
+# Get the base disk device
+BOOT_DISK="{disk_path}"
+
+IS_UEFI="{is_uefi}"
+
+if [ "$IS_UEFI" = "True" ]; then
+    # UEFI boot with GRUB
+    printf "Installing GRUB for UEFI...\\n"
+    
+    # Ensure EFI vars are mounted
+    mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>/dev/null || true
+    
+    # Install GRUB to EFI partition
+    grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=HorizonSec --recheck --no-nvram 2>/dev/null || \\
+    grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=HorizonSec --recheck
+    
+    if [ $? -eq 0 ]; then
+        echo "GRUB UEFI installation successful"
+    else
+        echo "ERROR: GRUB UEFI installation failed"
+        # Try fallback installation
+        grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=HorizonSec --removable --recheck
+    fi
+    
+else
+    # BIOS boot with GRUB
+    printf "Installing GRUB for BIOS...\\n"
+    
+    # Install GRUB to MBR
+    grub-install --target=i386-pc --recheck $BOOT_DISK
+    
+    if [ $? -ne 0 ]; then
+        echo "WARNING: Initial GRUB installation failed, trying with --force..."
+        grub-install --target=i386-pc --force --recheck $BOOT_DISK
+    fi
+fi
+
+# Generate GRUB configuration
+grub-mkconfig -o /boot/grub/grub.cfg
+
+# Verify GRUB config was created
+if [ ! -f /boot/grub/grub.cfg ]; then
+    echo "ERROR: GRUB configuration not generated!"
+    exit 1
+fi
+
+echo "Bootloader installation complete"
+
+printf "\\033[96m[8/10]\\033[0m Configuring services...\\n"
+systemctl enable NetworkManager > /dev/null 2>&1
+systemctl enable bluetooth > /dev/null 2>&1 || true
+systemctl enable ufw > /dev/null 2>&1
+systemctl enable fail2ban > /dev/null 2>&1
+systemctl enable tor > /dev/null 2>&1 || true
+systemctl enable docker > /dev/null 2>&1
+systemctl enable {desktop_dm_str} > /dev/null 2>&1
+{ssh_enable}
+
+# Firewall configuration
+ufw --force enable > /dev/null 2>&1
+ufw default deny incoming > /dev/null 2>&1
+ufw default allow outgoing > /dev/null 2>&1
+{firewall_ssh}
+
+# SSH configuration (if enabled)
+{ssh_gen_keys}
+
+printf "\\033[96m[9/10]\\033[0m Finalizing installation...\\n"
+
+# Ensure proper ownership
+chown -R {username}:{username} /home/{username}
+
+# Enable lightdm greeter autologin config (optional)
+if [ "{desktop_dm_str}" = "lightdm" ]; then
+    mkdir -p /etc/lightdm
+    cat > /etc/lightdm/lightdm.conf <<'LIGHTDMEOF'
+[Seat:*]
+greeter-session=lightdm-gtk-greeter
+LIGHTDMEOF
+fi
+
+# Configure Alacritty as default terminal for all DEs
+mkdir -p /home/{username}/.config
+
+# Set Alacritty as default terminal for GNOME
+if [ "{desktop_name_str}" = "GNOME" ]; then
+    sudo -u {username} dbus-launch gsettings set org.gnome.desktop.default-applications.terminal exec 'alacritty' 2>/dev/null || true
+    sudo -u {username} dbus-launch gsettings set org.gnome.desktop.default-applications.terminal exec-arg '' 2>/dev/null || true
+fi
+
+# Set Alacritty as default terminal for XFCE
+if [ "{desktop_name_str}" = "XFCE" ]; then
+    mkdir -p /home/{username}/.config/xfce4
+    cat > /home/{username}/.config/xfce4/helpers.rc <<'XFCETERM'
+TerminalEmulator=alacritty
+XFCETERM
+    chown -R {username}:{username} /home/{username}/.config/xfce4
+fi
+
+# Set Alacritty as default terminal for Cinnamon
+if [ "{desktop_name_str}" = "Cinnamon" ]; then
+    sudo -u {username} gsettings set org.cinnamon.desktop.default-applications.terminal exec 'alacritty' 2>/dev/null || true
+fi
+
+# Set Alacritty as default terminal for MATE
+if [ "{desktop_name_str}" = "MATE" ]; then
+    sudo -u {username} gsettings set org.mate.applications-terminal exec 'alacritty' 2>/dev/null || true
+fi
+
+# Set Alacritty as default terminal for LXQt
+if [ "{desktop_name_str}" = "LXQt" ]; then
+    mkdir -p /home/{username}/.config/lxqt
+    cat > /home/{username}/.config/lxqt/lxqt.conf <<'LXQTTERM'
+[General]
+terminal=alacritty
+LXQTTERM
+    chown -R {username}:{username} /home/{username}/.config/lxqt
+fi
+
+# Set Alacritty as default terminal for KDE Plasma
+if [ "{desktop_name_str}" = "KDE Plasma" ]; then
+    mkdir -p /home/{username}/.config
+    cat > /home/{username}/.config/kdeglobals <<'KDETERM'
+[General]
+TerminalApplication=alacritty
+KDETERM
+    chown -R {username}:{username} /home/{username}/.config/kdeglobals
+fi
+
+# Rebuild initramfs to ensure all modules are included
+mkinitcpio -P > /dev/null 2>&1 || true
+
+printf "\\033[96m[10/10]\\033[0m Installation complete!\\n"
+
+printf "\\033[38;5;208m╔══════════════════════════════════════════════════════════════════╗\\033[0m\\n"
+printf "\\033[38;5;208m║ \\033[92m✓ INSTALLATION COMPLETE%-43s \\033[38;5;208m║\\033[0m\\n" ""
+printf "\\033[38;5;208m╚══════════════════════════════════════════════════════════════════╝\\033[0m\\n"
+printf "\\n"
+printf "\\033[92mWelcome to HorizonSec!\\033[0m\\n"
+printf "\\n"
+printf "Your system has been configured with:\\n"
+printf "  \\033[38;5;208m•\\033[0m Desktop: {desktop_name_str}\\n"
+printf "  \\033[38;5;208m•\\033[0m Terminal: Alacritty\\n"
+printf "  \\033[38;5;208m•\\033[0m Penetration Testing Tools\\n"
+printf "  \\033[38;5;208m•\\033[0m Docker with user permissions\\n"
+printf "  \\033[38;5;208m•\\033[0m Firewall enabled (UFW)\\n"
+printf "  \\033[38;5;208m•\\033[0m Ghost Mode (Tor) enabled\\n"
+printf "\\n"
+printf "\\033[96mManagement Commands:\\033[0m\\n"
+printf "  \\033[38;5;208mhorizon-firewall\\033[0m    - Manage firewall and security\\n"
+printf "  \\033[38;5;208mhorizon-update\\033[0m      - Check for system updates\\n"
+printf "\\n"
+printf "\\033[96mNext steps:\\033[0m\\n"
+printf "  1. Remove installation media\\n"
+printf "  2. Type: \\033[38;5;208mreboot\\033[0m\\n"
+printf "  3. Login as: \\033[38;5;208m{username}\\033[0m\\n"
+printf "  4. Start pentesting!\\n"
+printf "\\n"
+"""
+
+    return script
+
+def create_install_script(username, password, root_password, desktop, gpu_drivers, ghost_mode, is_uefi, disk_path, hostname, timezone, ssh_config, firewall_config, install_type='full', gpu_name='Generic'):
+    """Generate the chroot installation script"""
+    
     if install_type == 'lite':
         pentest_pkgs = [
             # Network Scanning & Enumeration (25)
@@ -912,11 +1312,11 @@ def select_install_type():
     print(f"     • All desktop environments")
     print(f"     • Storage needed: ~80-100 GB")
     print()
-    print(f"  {Color.ORANGE}2){Color.END} {Color.BOLD}Lite Installation{Color.END} (30-45 minutes)")
-    print(f"     • 95+ core penetration testing tools")
-    print(f"     • Essential security toolkit")
+    print(f"  {Color.ORANGE}2){Color.END} {Color.BOLD}Lite Installation{Color.END} (30-50 minutes)")
+    print(f"     • 150+ core penetration testing tools")
+    print(f"     • Essential security toolkit (network, web, wireless, forensics)")
     print(f"     • All desktop environments")
-    print(f"     • Storage needed: ~40-50 GB")
+    print(f"     • Storage needed: ~50-60 GB")
     print()
     
     while True:
@@ -929,6 +1329,28 @@ def select_install_type():
             return 'lite'
         else:
             error("Invalid choice")
+
+def select_timezone():
+    """Prompt user for timezone"""
+    timezones = [
+        "UTC", "US/Eastern", "US/Central", "US/Mountain", "US/Pacific",
+        "Europe/London", "Europe/Paris", "Europe/Berlin", "Asia/Tokyo", "Australia/Sydney"
+    ]
+    
+    print(f"\n{Color.CYAN}Common timezones:{Color.END}")
+    for i, tz in enumerate(timezones, 1):
+        print(f"  {i}. {tz}")
+    
+    while True:
+        choice = input(f"{Color.CYAN}Select timezone (1-{len(timezones)}) or press Enter for UTC: {Color.END}").strip() or "1"
+        try:
+            if choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(timezones):
+                    return timezones[idx]
+        except (ValueError, IndexError):
+            pass
+        error("Invalid selection, try again")
 
 def main():
     """Main installation routine"""
@@ -1033,4 +1455,4 @@ def main():
     confirm = input(f"\n{Color.CYAN}Start installation? (y/n) [y]: {Color.END}").strip().lower()
     if confirm == 'n':
         error("Installation cancelled")
-        sys.exit(0) '
+        sys.exit(0)
