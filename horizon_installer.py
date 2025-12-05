@@ -519,12 +519,156 @@ def create_install_script(username, password, root_password, desktop, gpu_driver
             "python", "python-pip"
         ]
     
-    # Penetration testing packages (simplified for brevity)
-    pentest_pkgs = [
-        "nmap", "masscan", "wireshark-qt", "tcpdump",
-        "john", "hashcat", "hydra", "metasploit",
-        "aircrack-ng", "sqlmap", "nikto"
-    ]
+    # Penetration testing packages
+    if install_type == 'lite':
+        pentest_pkgs = [
+            # Network Scanning & Enumeration (25)
+            "nmap", "masscan", "netdiscover", "arp-scan", "arping",
+            "dnsenum", "fierce", "dmitry", "enum4linux", "nbtscan",
+            "theharvester", "traceroute", "whois", "ncat", "hping",
+            "unicornscan", "netmask", "mtr", "p0f", "netcat",
+            "iperf3", "nethogs", "nload", "iftop", "vnstat",
+            
+            # Web Application Testing (20)
+            "nikto", "sqlmap", "wpscan", "dirb", "gobuster",
+            "ffuf", "whatweb", "wafw00f", "burpsuite", "zaproxy",
+            "commix", "wfuzz", "skipfish", "sqlitebrowser", "testssl.sh",
+            "sslscan", "httpie", "curl", "wget", "arjun",
+            
+            # Wireless Security (15)
+            "aircrack-ng", "reaver", "bully", "pixiewps", "wifite",
+            "kismet", "mdk4", "mdk3", "hostapd", "dnsmasq",
+            "cowpatty", "rfkill", "macchanger", "airodump-ng", "aireplay-ng",
+            
+            # Password Cracking (15)
+            "john", "hashcat", "hydra", "medusa", "ncrack",
+            "ophcrack", "hashid", "crunch", "cewl", "cupp",
+            "hash-identifier", "findmyhash", "hashdeep", "pdfcrack", "crowbar",
+            
+            # Exploitation & Frameworks (12)
+            "metasploit", "exploitdb", "searchsploit", "crackmapexec",
+            "impacket", "routersploit", "shellnoob", "veil", "beef",
+            "armitage", "msfvenom", "msfconsole",
+            
+            # Network Analysis & MITM (18)
+            "wireshark-qt", "wireshark-cli", "tcpdump", "ettercap", "bettercap",
+            "mitmproxy", "dsniff", "responder", "arpspoof", "tshark",
+            "ngrep", "scapy", "sslstrip", "dnschef", "yersinia",
+            "ratproxy", "mitm6", "ntlmrelayx",
+            
+            # Reverse Engineering & Binary Analysis (15)
+            "ghidra", "radare2", "binwalk", "strings", "hexedit",
+            "objdump", "readelf", "nm", "strace", "ltrace",
+            "hexdump", "xxd", "binutils", "gdb", "pwndbg",
+            
+            # Forensics & Data Recovery (12)
+            "sleuthkit", "foremost", "autopsy", "volatility", "steghide",
+            "exiftool", "dc3dd", "ddrescue", "testdisk", "extundelete",
+            "scalpel", "bulk-extractor",
+            
+            # Security Auditing & Hardening (12)
+            "lynis", "openvas", "rkhunter", "chkrootkit", "aide",
+            "apparmor", "logwatch", "tiger", "checksec", "audit",
+            "osquery", "tripwire",
+            
+            # Encryption & Privacy (10)
+            "veracrypt", "gnupg", "openssl", "tomb", "cryptsetup",
+            "openvpn", "wireguard-tools", "tor", "torsocks", "proxychains-ng",
+            
+            # Vulnerability Scanning (8)
+            "openvas", "nikto", "wapiti", "skipfish", "nuclei",
+            "nessus", "nexpose", "qualysguard",
+            
+            # Sniffing & Spoofing (8)
+            "wireshark-qt", "tcpdump", "dsniff", "ettercap", "bettercap",
+            "arpspoof", "macchanger", "responder"
+        ]
+    else:
+        pentest_pkgs = [
+            # Network Scanning & Enumeration (30)
+            "nmap", "masscan", "netdiscover", "arp-scan", "arping",
+            "dnsenum", "fierce", "dmitry", "enum4linux", "nbtscan",
+            "theharvester", "ike-scan", "unicornscan", "hping",
+            "traceroute", "whois", "ncat", "netmask", "mtr",
+            "p0f", "netcat", "netperf", "iperf3", "nethogs",
+            "nload", "iftop", "vnstat", "ss", "lsof", "fuser",
+            
+            # Web Application Testing (25)
+            "nikto", "sqlmap", "wpscan", "dirb", "gobuster",
+            "ffuf", "whatweb", "wafw00f", "burpsuite", "zaproxy",
+            "commix", "wfuzz", "skipfish", "sqlitebrowser", "nuclei",
+            "testssl.sh", "sslscan", "jwt-cli", "httpie", "curl",
+            "wget", "arjun", "katana", "httpx", "waymore",
+            
+            # Wireless Security (15)
+            "aircrack-ng", "reaver", "bully", "pixiewps", "wifite",
+            "kismet", "mdk4", "mdk3", "hostapd", "dnsmasq",
+            "cowpatty", "airmon-ng", "wifipumpkin3", "rfkill", "rtl-sdr",
+            
+            # Password Cracking (15)
+            "john", "hashcat", "hydra", "medusa", "ncrack",
+            "ophcrack", "hashid", "crunch", "cewl", "cupp",
+            "hash-identifier", "findmyhash", "hashdeep", "pdfcrack", "crowbar",
+            
+            # Exploitation & Frameworks (10)
+            "metasploit", "exploitdb", "searchsploit", "crackmapexec",
+            "impacket", "routersploit", "setoolkit", "powersploit",
+            "empire", "covenant",
+            
+            # Network Analysis (20)
+            "wireshark-qt", "tcpdump", "ettercap", "bettercap",
+            "mitmproxy", "dsniff", "responder", "arpspoof", "tshark",
+            "ngrep", "scapy", "hping", "fragroute", "macchanger",
+            "ratproxy", "sslstrip", "dnschef", "yersinia", "lbd", "wafw00f",
+            
+            # Reverse Engineering & Forensics (25)
+            "ghidra", "radare2", "binwalk", "strings", "hexedit",
+            "sleuthkit", "foremost", "autopsy", "volatility", "volatility3",
+            "steghide", "exiftool", "dc3dd", "ddrescue", "testdisk",
+            "extundelete", "scalpel", "exifprobe", "hexinject", "objdump",
+            "readelf", "nm", "strace", "ltrace", "bokken",
+            
+            # System Analysis & Debugging (15)
+            "gdb", "lldb", "valgrind", "perf", "bpftrace",
+            "sysstat", "iotop", "hardinfo", "inxi", "procps-ng",
+            "psmisc", "audit", "osquery", "cppcheck", "clang-tools-extra",
+            
+            # Security Auditing (20)
+            "lynis", "openvas", "rkhunter", "chkrootkit", "aide",
+            "apparmor", "logwatch", "fail2ban", "ufw", "iptables",
+            "nftables", "clamav", "clamav-daemon", "yara", "python-yara",
+            "ssh-audit", "checksec", "tiger", "nikto", "openscap",
+            
+            # Encryption & Privacy (15)
+            "veracrypt", "gnupg", "openssl", "tomb", "cryptsetup",
+            "openvpn", "wireguard-tools", "openfortivpn", "strongswan",
+            "xl2tpd", "tor", "torsocks", "proxychains-ng", "privoxy", "i2pd",
+            
+            # Mobile & IoT (10)
+            "apktool", "apksigner", "jadx", "frida", "objection",
+            "androguard", "dex2jar", "smali", "adb", "fastboot",
+            
+            # Cloud & Container Security (10)
+            "docker", "docker-compose", "kubectl", "helm", "trivy",
+            "prowler", "scout", "cloudsploit", "pacu", "weirdaaa",
+            
+            # Social Engineering (5)
+            "setoolkit", "gophish", "evilginx2", "modlishka", "beef",
+            
+            # Utilities & Misc (30)
+            "macchanger", "proxychains-ng", "bleachbit", "socat",
+            "netcat", "iperf3", "jq", "exiftool", "upx",
+            "redsocks", "udptunnel", "iodine", "dns2tcp", "ptunnel",
+            "stunnel", "udp2raw", "chisel", "ligolo", "pwncat",
+            "evil-winrm", "bloodhound", "neo4j", "pypykatz", "sprayhound",
+            "kerbrute", "rubeus", "mimikatz", "lazagne", "keepass2john"
+        ]
+    
+    # SSH key generation commands
+    ssh_gen_keys = ""
+    if ssh_config.get('enabled') and ssh_config.get('generate_keys'):
+        ssh_gen_keys = f"""mkdir -p /home/{username}/.ssh && chmod 700 /home/{username}/.ssh
+sudo -u {username} ssh-keygen -t ed25519 -f /home/{username}/.ssh/id_ed25519 -N '' -q 2>/dev/null || true"""
     
     script = f"""#!/bin/bash
 set -e
@@ -657,11 +801,10 @@ systemctl enable {desktop['dm']} > /dev/null 2>&1
 ufw --force enable > /dev/null 2>&1
 ufw default deny incoming > /dev/null 2>&1
 ufw default allow outgoing > /dev/null 2>&1
-{"ufw allow 22/tcp > /dev/null 2>&1" if firewall_config.get('ssh', True) else ""}
+{f"ufw allow 22/tcp > /dev/null 2>&1" if firewall_config.get('ssh', True) else ""}
 
 # SSH configuration (if enabled)
-{"mkdir -p /home/{username}/.ssh && chmod 700 /home/{username}/.ssh" if ssh_config.get('enabled') else ""}
-{"sudo -u {username} ssh-keygen -t ed25519 -f /home/{username}/.ssh/id_ed25519 -N '' -q 2>/dev/null || true" if ssh_config.get('enabled') and ssh_config.get('generate_keys') else ""}
+{ssh_gen_keys}
 
 printf "\\033[96m[9/10]\\033[0m Finalizing installation...\\n"
 
@@ -764,7 +907,16 @@ def select_install_type():
     
     print(f"\n{Color.BOLD}Installation Types:{Color.END}\n")
     print(f"  {Color.ORANGE}1){Color.END} {Color.BOLD}Full Installation{Color.END} (3-5 hours)")
+    print(f"     • 230+ penetration testing tools")
+    print(f"     • Includes mobile, cloud, and IoT security")
+    print(f"     • All desktop environments")
+    print(f"     • Storage needed: ~80-100 GB")
+    print()
     print(f"  {Color.ORANGE}2){Color.END} {Color.BOLD}Lite Installation{Color.END} (30-45 minutes)")
+    print(f"     • 95+ core penetration testing tools")
+    print(f"     • Essential security toolkit")
+    print(f"     • All desktop environments")
+    print(f"     • Storage needed: ~40-50 GB")
     print()
     
     while True:
