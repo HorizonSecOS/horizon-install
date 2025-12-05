@@ -155,49 +155,80 @@ def check_uefi():
 def check_for_updates():
     """Check if installer has updates and auto-update if needed"""
     import hashlib
-    import tempfile
-    
+
     header("Update Check")
-    
+
+    repo_dir = "/usr/local/share/horizonsec"
+
     try:
         info("Checking for HorizonSec installer updates...")
-        temp_dir = tempfile.mkdtemp()
-        result = subprocess.run(
-            f"cd {temp_dir} && git clone --depth 1 https://github.com/HorizonSecOS/horizon-install.git > /dev/null 2>&1",
-            shell=True,
-            capture_output=True,
-            timeout=15
-        )
-        
+
+        if os.path.exists(repo_dir):
+            # Pull existing repo
+            result = subprocess.run(
+                f"cd {repo_dir} && git pull --depth 1 > /dev/null 2>&1",
+                shell=True,
+                capture_output=True,
+                timeout=15
+            )
+        else:
+            # Clone new repo
+            os.makedirs(repo_dir, exist_ok=True)
+            result = subprocess.run(
+                f"git clone --depth 1 https://github.com/HorizonSecOS/horizon-install.git {repo_dir} > /dev/null 2>&1",
+                shell=True,
+                capture_output=True,
+                timeout=15
+            )
+
         if result.returncode != 0:
             warning("Could not check for updates (network issue)")
-            subprocess.run(f"rm -rf {temp_dir}", shell=True)
             return False
-        
-        remote_script = f"{temp_dir}/horizon-install/horizon_installer.py"
+
+        remote_script = f"{repo_dir}/horizon_installer.py"
+        remote_build_script = f"{repo_dir}/build_horizon_iso.sh"
         if not os.path.exists(remote_script):
             warning("Could not find remote installer script")
-            subprocess.run(f"rm -rf {temp_dir}", shell=True)
             return False
-        
+
         with open(remote_script, 'rb') as f:
             remote_hash = hashlib.md5(f.read()).hexdigest()
-        
+
         with open(__file__, 'rb') as f:
             local_hash = hashlib.md5(f.read()).hexdigest()
-        
+
+        updated = False
+
         if remote_hash != local_hash:
             info("HorizonSec installer update available")
             print(f"{Color.YELLOW}Updating to latest version...{Color.END}")
             subprocess.run(f"cp {remote_script} /usr/local/bin/horizon-install && chmod 755 /usr/local/bin/horizon-install", shell=True, check=False)
             success("Installer updated. Continuing with installation...")
-            subprocess.run(f"rm -rf {temp_dir}", shell=True)
-            return True
-        else:
-            success("Installer is up to date")
-            subprocess.run(f"rm -rf {temp_dir}", shell=True)
-            return False
-            
+            updated = True
+
+        # Check for build script update
+        installer_dir = os.path.dirname(os.path.abspath(__file__))
+        local_build_script = os.path.join(installer_dir, "build_horizon_iso.sh")
+
+        if os.path.exists(local_build_script) and os.path.exists(remote_build_script):
+            with open(remote_build_script, 'rb') as f:
+                remote_build_hash = hashlib.md5(f.read()).hexdigest()
+
+            with open(local_build_script, 'rb') as f:
+                local_build_hash = hashlib.md5(f.read()).hexdigest()
+
+            if remote_build_hash != local_build_hash:
+                info("HorizonSec build script update available")
+                print(f"{Color.YELLOW}Updating build script...{Color.END}")
+                subprocess.run(f"cp {remote_build_script} {local_build_script} && chmod 755 {local_build_script}", shell=True, check=False)
+                success("Build script updated")
+                updated = True
+
+        if not updated:
+            success("Installer and build script are up to date")
+
+        return updated
+
     except subprocess.TimeoutExpired:
         warning("Update check timed out")
         return False
@@ -238,11 +269,11 @@ def detect_gpu():
     header("GPU Detection")
     
     gpu_output = cmd("lspci 2>/dev/null | grep -iE 'vga|3d|display'", capture=True, check=False)
-    
-    if not gpu_output:
+
+    if not gpu_output or not isinstance(gpu_output, str):
         gpu_output = ""
-    
-    gpu_lines = gpu_output.strip().split('\n') if gpu_output else []
+
+    gpu_lines = gpu_output.split('\n') if gpu_output else []
     
     gpu = '\n'.join(gpu_lines) if gpu_lines else ""
     
@@ -269,9 +300,12 @@ def detect_gpu():
 def list_disks():
     """List available disks"""
     try:
-        output = cmd('lsblk -J -d -o NAME,SIZE,MODEL,TYPE', capture=True)
+        output = cmd('lsblk -J -d -o NAME,SIZE,MODEL,TYPE', capture=True, check=False)
+        if not isinstance(output, str):
+            error("Failed to enumerate disks")
+            sys.exit(1)
         data = json.loads(output)
-        return [d for d in data.get('blockdevices', []) 
+        return [d for d in data.get('blockdevices', [])
                 if d['type'] == 'disk' and not d['name'].startswith('loop')]
     except:
         error("Failed to enumerate disks")
@@ -401,9 +435,8 @@ def install_base(mirror_selection='auto'):
     
     base_packages = [
         "base", "linux", "linux-firmware", "linux-headers",
-        "base-devel", "git", "limine", "efibootmgr",
+        "base-devel", "git", "grub", "efibootmgr",
         "networkmanager", "sudo", "nano", "vim",
-        "intel-ucode", "amd-ucode",
         "bash-completion", "man-db", "man-pages"
     ]
     
@@ -966,12 +999,7 @@ if [ "$IS_UEFI" = "True" ]; then
     mkdir -p /boot/EFI/arch-limine
     cp /usr/share/limine/BOOTX64.EFI /boot/EFI/arch-limine/ 2>/dev/null || true
     efibootmgr --create --disk $BOOT_DISK --part 1 --label "HorizonSec Limine" --loader "\\\\EFI\\\\arch-limine\\\\BOOTX64.EFI" --unicode 2>/dev/null || true
-else
-    cp /usr/share/limine/limine-bios.sys /boot/ 2>/dev/null || true
-    cp /usr/share/limine/limine.conf /boot/ 2>/dev/null || true
-fi
-
-cat > /boot/limine.conf <<LIMINE_EOF
+    cat > /boot/limine.conf <<LIMINE_EOF
 timeout: 5
 default-entry: 1
 background-color: 0F0F14
@@ -983,9 +1011,20 @@ highlight-color: FF8C00
     cmdline: root=UUID=$ROOT_UUID rw quiet
     module_path: boot():/initramfs-linux.img
 LIMINE_EOF
+else
+    grub-install --target=i386-pc $BOOT_DISK
+    mkdir -p /boot/grub
+    cat > /boot/grub/grub.cfg <<GRUB_EOF
+set timeout=5
+set default=0
+set menu_color_normal=white/black
+set menu_color_highlight=black/white
 
-if [ "$IS_UEFI" != "True" ]; then
-    limine bios-install "$BOOT_DISK"
+menuentry "HorizonSec Linux" {{
+    linux /vmlinuz-linux root=UUID=$ROOT_UUID rw quiet
+    initrd /initramfs-linux.img
+}}
+GRUB_EOF
 fi
 
 printf "\\033[96m[9/10]\\033[0m Configuring services...\\n"
@@ -1158,18 +1197,25 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-TEMP_DIR=$(mktemp -d)
-cd "$TEMP_DIR"
+REPO_DIR="/usr/local/share/horizonsec"
 
 echo "Checking for HorizonSec updates..."
-git clone --depth 1 https://github.com/HorizonSecOS/horizon-install.git 2>&1 | grep -v "warning:"
 
-if [ ! -f "horizon-install/horizon_installer.py" ]; then
-    rm -rf "$TEMP_DIR"
+if [ -d "$REPO_DIR" ]; then
+    cd "$REPO_DIR"
+    git pull --depth 1 2>&1 | grep -v "warning:"
+else
+    mkdir -p /usr/local/share
+    git clone --depth 1 https://github.com/HorizonSecOS/horizon-install.git "$REPO_DIR" 2>&1 | grep -v "warning:"
+    cd "$REPO_DIR"
+fi
+
+if [ ! -f "horizon_installer.py" ]; then
+    echo "Could not find installer script"
     exit 0
 fi
 
-LATEST_VERSION=$(grep -m1 "v[0-9]" horizon-install/horizon_installer.py | head -1)
+LATEST_VERSION=$(grep -m1 "v[0-9]" horizon_installer.py | head -1)
 CURRENT_VERSION=$(grep -m1 "v[0-9]" /usr/local/bin/horizon-install 2>/dev/null | head -1)
 
 echo "Current version: $CURRENT_VERSION"
@@ -1178,19 +1224,19 @@ echo "Latest version:  $LATEST_VERSION"
 if [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
     echo ""
     echo "Installing HorizonSec updates..."
-    cp horizon-install/horizon_installer.py /usr/local/bin/horizon-install
+    cp horizon_installer.py /usr/local/bin/horizon-install
     chmod 755 /usr/local/bin/horizon-install
-    
-    if [ -f "horizon-install/horizon-firewall" ]; then
-        cp horizon-install/horizon-firewall /usr/local/bin/horizon-firewall
+
+    if [ -f "horizon-firewall" ]; then
+        cp horizon-firewall /usr/local/bin/horizon-firewall
         chmod 755 /usr/local/bin/horizon-firewall
     fi
-    
-    if [ -f "horizon-install/horizon-update" ]; then
-        cp horizon-install/horizon-update /usr/local/bin/horizon-update
+
+    if [ -f "horizon-update" ]; then
+        cp horizon-update /usr/local/bin/horizon-update
         chmod 755 /usr/local/bin/horizon-update
     fi
-    
+
     echo "Updates installed successfully"
     echo ""
     echo "Running HorizonSec installer..."
@@ -1198,8 +1244,6 @@ if [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
 else
     echo "System is up to date"
 fi
-
-rm -rf "$TEMP_DIR"
 UPDATE_EOF
 chmod +x /usr/local/bin/horizon-update
 
@@ -1364,6 +1408,7 @@ printf "  1. Reboot: \\033[38;5;208mreboot\\033[0m\\n"
 printf "  2. Log in as: \\033[38;5;208m{username}\\033[0m\\n"
 printf "  3. Start hacking!\\n"
 printf "\\n"
+printf "If you need to manually check for an update, please run \\033[38;5;208mhorizon-update\\033[0m to update the script.\\n"
 """
 
     return script
