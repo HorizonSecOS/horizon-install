@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+
+usage() {
+    echo "horizon-update - Update HorizonSec system packages and tools"
+    echo ""
+    echo "Usage: horizon-update [COMMAND]"
+    echo ""
+    echo "Commands:"
+    echo "  check           Check for available updates"
+    echo "  install         Install all available updates"
+    echo "  help, -h, --help  Show this help message"
+    echo ""
+    exit 0
+}
+
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo "Error: This command must be run as root"
+        exit 1
+    fi
+}
+
+check_updates() {
+    echo "╔════════════════════════════════════════════════════════╗"
+    echo "║          Checking for HorizonSec Updates              ║"
+    echo "╚════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    TEMP_DIR=$(mktemp -d)
+    cd "$TEMP_DIR"
+    
+    echo "Fetching latest version info from GitHub..."
+    git clone --depth 1 https://github.com/HorizonSecOS/horizon-install.git > /dev/null 2>&1
+    
+    if [ ! -f "horizon-install/horizon_installer.py" ]; then
+        echo "✗ Failed to fetch update information"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    
+    LATEST_VERSION=$(grep -m1 "v[0-9]" horizon-install/horizon_installer.py | head -1)
+    CURRENT_VERSION=$(grep -m1 "v[0-9]" /usr/local/bin/horizon-install 2>/dev/null | head -1)
+    
+    echo "Current version: $CURRENT_VERSION"
+    echo "Latest version:  $LATEST_VERSION"
+    
+    rm -rf "$TEMP_DIR"
+    
+    if [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
+        echo ""
+        echo "✓ Updates available! Run 'sudo horizon-update install' to update"
+    else
+        echo ""
+        echo "✓ System is up to date"
+    fi
+}
+
+install_updates() {
+    check_root
+    echo "╔════════════════════════════════════════════════════════╗"
+    echo "║          Installing HorizonSec Updates                ║"
+    echo "╚════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    TEMP_DIR=$(mktemp -d)
+    cd "$TEMP_DIR"
+    
+    echo "Downloading latest scripts from GitHub..."
+    git clone --depth 1 https://github.com/HorizonSecOS/horizon-install.git > /dev/null 2>&1
+    
+    if [ ! -f "horizon-install/horizon_installer.py" ]; then
+        echo "✗ Failed to download updates"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+    
+    echo "Installing updates..."
+    cp horizon-install/horizon_installer.py /usr/local/bin/horizon-install
+    chmod 755 /usr/local/bin/horizon-install
+    
+    if [ -f "horizon-install/horizon-firewall" ]; then
+        cp horizon-install/horizon-firewall /usr/local/bin/horizon-firewall
+        chmod 755 /usr/local/bin/horizon-firewall
+    fi
+    
+    if [ -f "horizon-install/horizon-update" ]; then
+        cp horizon-install/horizon-update /usr/local/bin/horizon-update
+        chmod 755 /usr/local/bin/horizon-update
+    fi
+    
+    rm -rf "$TEMP_DIR"
+    
+    echo ""
+    echo "✓ Updates installed successfully"
+    echo ""
+}
+
+case "${1,,}" in
+    check)
+        check_updates
+        ;;
+    install)
+        install_updates
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    "")
+        check_updates
+        ;;
+    *)
+        echo "Error: Unknown command '$1'"
+        usage
+        ;;
+esac

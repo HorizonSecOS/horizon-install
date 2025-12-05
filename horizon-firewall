@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+
+usage() {
+    echo "horizon-firewall - Toggle HorizonSec Firewall and Services"
+    echo ""
+    echo "Usage: horizon-firewall [COMMAND]"
+    echo ""
+    echo "Commands:"
+    echo "  on              Enable firewall and security services"
+    echo "  off             Disable firewall (keep other services)"
+    echo "  status          Show current firewall status"
+    echo "  help, -h, --help  Show this help message"
+    echo ""
+    exit 0
+}
+
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo "Error: This command must be run as root"
+        exit 1
+    fi
+}
+
+show_status() {
+    echo "═══════════════════════════════════════════════"
+    echo "   HorizonSec Security Services Status"
+    echo "═══════════════════════════════════════════════"
+    echo ""
+    
+    if systemctl is-active --quiet ufw; then
+        echo "✓ Firewall (UFW):        ENABLED"
+    else
+        echo "✗ Firewall (UFW):        DISABLED"
+    fi
+    
+    if systemctl is-active --quiet fail2ban; then
+        echo "✓ Fail2Ban:              ENABLED"
+    else
+        echo "✗ Fail2Ban:              DISABLED"
+    fi
+    
+    if systemctl is-active --quiet tor; then
+        echo "✓ Ghost Mode (Tor):      ENABLED"
+    else
+        echo "✗ Ghost Mode (Tor):      DISABLED"
+    fi
+    
+    echo ""
+    echo "Firewall Rules:"
+    ufw status | head -20
+    echo ""
+}
+
+enable_firewall() {
+    check_root
+    echo "Enabling HorizonSec Firewall and Security Services..."
+    
+    ufw --force enable > /dev/null 2>&1
+    ufw default deny incoming > /dev/null 2>&1
+    ufw default allow outgoing > /dev/null 2>&1
+    ufw allow 22/tcp > /dev/null 2>&1
+    
+    systemctl enable ufw > /dev/null 2>&1
+    systemctl start ufw > /dev/null 2>&1
+    
+    systemctl enable fail2ban > /dev/null 2>&1
+    systemctl start fail2ban > /dev/null 2>&1
+    
+    systemctl enable tor > /dev/null 2>&1
+    systemctl start tor > /dev/null 2>&1
+    
+    echo "✓ Firewall enabled successfully"
+    show_status
+}
+
+disable_firewall() {
+    check_root
+    echo "Disabling HorizonSec Firewall..."
+    
+    ufw --force disable > /dev/null 2>&1
+    systemctl disable ufw > /dev/null 2>&1
+    systemctl stop ufw > /dev/null 2>&1
+    
+    echo "✓ Firewall disabled"
+    echo ""
+    echo "Note: Ghost Mode (Tor) and Fail2Ban remain active for security"
+    show_status
+}
+
+case "${1,,}" in
+    on|enable)
+        enable_firewall
+        ;;
+    off|disable)
+        disable_firewall
+        ;;
+    status|info)
+        check_root
+        show_status
+        ;;
+    help|-h|--help)
+        usage
+        ;;
+    "")
+        show_status
+        ;;
+    *)
+        echo "Error: Unknown command '$1'"
+        usage
+        ;;
+esac
