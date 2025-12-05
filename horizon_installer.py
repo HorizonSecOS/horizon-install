@@ -151,6 +151,43 @@ def check_uefi():
         success("BIOS firmware detected")
     return is_uefi
 
+def check_for_updates():
+    """Check if installer has updates and auto-update if needed"""
+    try:
+        import hashlib
+        import tempfile
+        temp_dir = tempfile.mkdtemp()
+        result = subprocess.run(
+            f"cd {temp_dir} && git clone --depth 1 https://github.com/HorizonSecOS/horizon-install.git > /dev/null 2>&1",
+            shell=True,
+            capture_output=True
+        )
+        
+        if result.returncode != 0:
+            subprocess.run(f"rm -rf {temp_dir}", shell=True)
+            return
+        
+        remote_script = f"{temp_dir}/horizon-install/horizon_installer.py"
+        if not os.path.exists(remote_script):
+            subprocess.run(f"rm -rf {temp_dir}", shell=True)
+            return
+        
+        with open(remote_script, 'rb') as f:
+            remote_hash = hashlib.md5(f.read()).hexdigest()
+        
+        with open(__file__, 'rb') as f:
+            local_hash = hashlib.md5(f.read()).hexdigest()
+        
+        if remote_hash != local_hash:
+            info("HorizonSec installer update available")
+            print(f"{Color.YELLOW}Updating to latest version...{Color.END}")
+            subprocess.run(f"cp {remote_script} /usr/local/bin/horizon-install && chmod 755 /usr/local/bin/horizon-install", shell=True, check=False)
+            success("Installer updated. Continuing with installation...")
+        
+        subprocess.run(f"rm -rf {temp_dir}", shell=True)
+    except:
+        pass
+
 def setup_network():
     """Configure network connectivity"""
     header("Network Configuration")
@@ -174,6 +211,8 @@ def setup_network():
     cmd("pacman-key --init", check=False)
     cmd("pacman-key --populate archlinux", check=False)
     cmd("pacman -Sy --noconfirm", check=False)
+    
+    check_for_updates()
 
 def detect_gpu():
     """Auto-detect GPU and return appropriate drivers"""
@@ -1089,6 +1128,93 @@ Name=Show Firewall Status
 Exec=x-terminal-emulator -e 'sudo horizon-firewall status'
 DESKTOP_EOF
 
+cat > /usr/local/bin/horizon-update <<'UPDATE_EOF'
+#!/usr/bin/env bash
+
+if [[ $EUID -ne 0 ]]; then
+    echo "Error: This command must be run as root"
+    exit 1
+fi
+
+TEMP_DIR=$(mktemp -d)
+cd "$TEMP_DIR"
+
+echo "Checking for HorizonSec updates..."
+git clone --depth 1 https://github.com/HorizonSecOS/horizon-install.git 2>&1 | grep -v "warning:"
+
+if [ ! -f "horizon-install/horizon_installer.py" ]; then
+    rm -rf "$TEMP_DIR"
+    exit 0
+fi
+
+LATEST_VERSION=$(grep -m1 "v[0-9]" horizon-install/horizon_installer.py | head -1)
+CURRENT_VERSION=$(grep -m1 "v[0-9]" /usr/local/bin/horizon-install 2>/dev/null | head -1)
+
+echo "Current version: $CURRENT_VERSION"
+echo "Latest version:  $LATEST_VERSION"
+
+if [ "$LATEST_VERSION" != "$CURRENT_VERSION" ]; then
+    echo ""
+    echo "Installing HorizonSec updates..."
+    cp horizon-install/horizon_installer.py /usr/local/bin/horizon-install
+    chmod 755 /usr/local/bin/horizon-install
+    
+    if [ -f "horizon-install/horizon-firewall" ]; then
+        cp horizon-install/horizon-firewall /usr/local/bin/horizon-firewall
+        chmod 755 /usr/local/bin/horizon-firewall
+    fi
+    
+    if [ -f "horizon-install/horizon-update" ]; then
+        cp horizon-install/horizon-update /usr/local/bin/horizon-update
+        chmod 755 /usr/local/bin/horizon-update
+    fi
+    
+    echo "Updates installed successfully"
+    echo ""
+    echo "Running HorizonSec installer..."
+    /usr/local/bin/horizon-install --auto-update
+else
+    echo "System is up to date"
+fi
+
+rm -rf "$TEMP_DIR"
+UPDATE_EOF
+chmod +x /usr/local/bin/horizon-update
+
+mkdir -p /etc/systemd/system
+cat > /etc/systemd/system/horizon-update.service <<'SERVICE_EOF'
+[Unit]
+Description=HorizonSec Auto-Update
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/horizon-update
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+cat > /etc/systemd/system/horizon-update.timer <<'TIMER_EOF'
+[Unit]
+Description=HorizonSec Auto-Update Timer
+Requires=horizon-update.service
+
+[Timer]
+OnBootSec=2s
+OnUnitActiveSec=1d
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
+TIMER_EOF
+
+systemctl daemon-reload
+systemctl enable horizon-update.timer > /dev/null 2>&1
+systemctl start horizon-update.timer > /dev/null 2>&1
+
 printf "\\033[96m[10/10]\\033[0m Finalizing installation...\\n"
 
 {"echo 'Configuring sudo for package managers...' > /dev/null 2>&1" if install_type == 'full' else ""}
@@ -1449,10 +1575,19 @@ def main():
     parser = argparse.ArgumentParser(description='HorizonSec OS Installer')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output (show all commands)')
     parser.add_argument('--attended', action='store_true', help='Enable fully interactive mode for all installation steps')
+    parser.add_argument('--auto-update', action='store_true', help='Auto-update mode (triggered by system boot)')
     args = parser.parse_args()
     
     VERBOSE = args.verbose
     attended_mode = args.attended
+    auto_update_mode = args.auto_update
+    
+    if auto_update_mode:
+        logo()
+        print(f"\n{Color.GREEN}{Color.BOLD}✓ HorizonSec System Updated{Color.END}\n")
+        print(f"  All tools and scripts are up to date.")
+        print(f"  System is ready for use.\n")
+        sys.exit(0)
     
     if VERBOSE:
         info("Verbose mode enabled - all commands will be displayed")
@@ -1464,6 +1599,7 @@ def main():
     
     logo()
     check_root()
+    setup_network()
     
     header("Welcome to HorizonSec Installer")
     
@@ -1472,7 +1608,6 @@ def main():
     sys_requirements = check_system_requirements()
     
     is_uefi = check_uefi()
-    setup_network()
     gpu_name, gpu_drivers = detect_gpu()
     
     disk_name, disk_path = select_disk()
