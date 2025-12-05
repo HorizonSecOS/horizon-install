@@ -18,6 +18,7 @@ INSTALL_TYPE = 'full'
 TOTAL_PACKAGE_COUNT = 0
 INSTALLED_PACKAGE_COUNT = 0
 INSTALLATION_START_TIME = None
+UPDATE_APPLIED = False
 
 class Color:
     """ANSI color codes for terminal output"""
@@ -153,24 +154,31 @@ def check_uefi():
 
 def check_for_updates():
     """Check if installer has updates and auto-update if needed"""
+    import hashlib
+    import tempfile
+    
+    header("Update Check")
+    
     try:
-        import hashlib
-        import tempfile
+        info("Checking for HorizonSec installer updates...")
         temp_dir = tempfile.mkdtemp()
         result = subprocess.run(
             f"cd {temp_dir} && git clone --depth 1 https://github.com/HorizonSecOS/horizon-install.git > /dev/null 2>&1",
             shell=True,
-            capture_output=True
+            capture_output=True,
+            timeout=15
         )
         
         if result.returncode != 0:
+            warning("Could not check for updates (network issue)")
             subprocess.run(f"rm -rf {temp_dir}", shell=True)
-            return
+            return False
         
         remote_script = f"{temp_dir}/horizon-install/horizon_installer.py"
         if not os.path.exists(remote_script):
+            warning("Could not find remote installer script")
             subprocess.run(f"rm -rf {temp_dir}", shell=True)
-            return
+            return False
         
         with open(remote_script, 'rb') as f:
             remote_hash = hashlib.md5(f.read()).hexdigest()
@@ -183,13 +191,24 @@ def check_for_updates():
             print(f"{Color.YELLOW}Updating to latest version...{Color.END}")
             subprocess.run(f"cp {remote_script} /usr/local/bin/horizon-install && chmod 755 /usr/local/bin/horizon-install", shell=True, check=False)
             success("Installer updated. Continuing with installation...")
-        
-        subprocess.run(f"rm -rf {temp_dir}", shell=True)
-    except:
-        pass
+            subprocess.run(f"rm -rf {temp_dir}", shell=True)
+            return True
+        else:
+            success("Installer is up to date")
+            subprocess.run(f"rm -rf {temp_dir}", shell=True)
+            return False
+            
+    except subprocess.TimeoutExpired:
+        warning("Update check timed out")
+        return False
+    except Exception as e:
+        warning(f"Update check failed: {str(e)}")
+        return False
 
 def setup_network():
     """Configure network connectivity"""
+    global UPDATE_APPLIED
+    
     header("Network Configuration")
     
     cmd("systemctl start NetworkManager", check=False)
@@ -204,15 +223,15 @@ def setup_network():
     time.sleep(2)
     if cmd("ping -c 2 archlinux.org", check=False):
         success("Network is active")
+        UPDATE_APPLIED = check_for_updates()
     else:
-        warning("Network may not be connected. Continuing anyway...")
+        warning("Network may not be connected. Skipping update check...")
+        UPDATE_APPLIED = False
     
     info("Initializing package keys...")
     cmd("pacman-key --init", check=False)
     cmd("pacman-key --populate archlinux", check=False)
     cmd("pacman -Sy --noconfirm", check=False)
-    
-    check_for_updates()
 
 def detect_gpu():
     """Auto-detect GPU and return appropriate drivers"""
@@ -301,6 +320,9 @@ def partition_disk(disk_name, disk_path, is_uefi):
     info("Wiping disk...")
     cmd(f"wipefs -af {disk_path}")
     cmd(f"sgdisk -Z {disk_path}")
+    # Ensure clean MBR for BIOS systems
+    if not is_uefi:
+        cmd(f"dd if=/dev/zero of={disk_path} bs=512 count=1")
     
     sep = 'p' if 'nvme' in disk_name or 'mmcblk' in disk_name else ''
     
@@ -331,20 +353,20 @@ def partition_disk(disk_name, disk_path, is_uefi):
     else:
         info("Creating MBR partition table (BIOS)...")
         cmd(f"parted -s {disk_path} mklabel msdos")
-        
+
         info("Creating partitions (BOOT + SWAP + ROOT)...")
-        cmd(f"parted -s {disk_path} mkpart primary ext4 1MiB 512MiB")
+        cmd(f"parted -s {disk_path} mkpart primary fat32 1MiB 512MiB")
         cmd(f"parted -s {disk_path} set 1 boot on")
         cmd(f"parted -s {disk_path} mkpart primary linux-swap 512MiB 8704MiB")
         cmd(f"parted -s {disk_path} mkpart primary ext4 8704MiB 100%")
-        
+
         boot = f"{disk_path}{sep}1"
         swap = f"{disk_path}{sep}2"
         root = f"{disk_path}{sep}3"
         efi = boot
-        
+
         info("Formatting partitions...")
-        cmd(f"mkfs.ext4 -F {boot}")
+        cmd(f"mkfs.fat -F32 {boot}")
         cmd(f"mkswap {swap}")
         cmd(f"mkfs.ext4 -F {root}")
         
@@ -963,7 +985,7 @@ highlight-color: FF8C00
 LIMINE_EOF
 
 if [ "$IS_UEFI" != "True" ]; then
-    limine bios-install "$BOOT_DISK" 2>/dev/null || true
+    limine bios-install "$BOOT_DISK"
 fi
 
 printf "\\033[96m[9/10]\\033[0m Configuring services...\\n"
@@ -1718,6 +1740,7 @@ def main():
     info(f"  • Boot disk: {disk_path}")
     info(f"  • Desktop: {desktop['name']}")
     info(f"  • Username: {username}")
+    info(f"  • Installer update: {'Applied' if UPDATE_APPLIED else 'Not required'}")
     
     if attended_mode:
         if input(f"{Color.CYAN}Reboot now? (y/n): {Color.END}").lower() == 'y':
