@@ -449,6 +449,7 @@ def install_base(mirror_selection='auto'):
     base_packages = [
         "base", "linux", "linux-firmware", "linux-headers",
         "base-devel", "git", "grub", "efibootmgr", "dosfstools",
+        "mtools", "os-prober",
         "networkmanager", "sudo", "nano", "vim",
         "bash-completion", "man-db", "man-pages"
     ]
@@ -732,6 +733,27 @@ printf "\\033[96m[10/10]\\033[0m Installation complete!\\n"
 printf "\\033[38;5;208m╔══════════════════════════════════════════════════════════════════╗\\033[0m\\n"
 printf "\\033[38;5;208m║ \\033[92m✓ INSTALLATION COMPLETE%-43s \\033[38;5;208m║\\033[0m\\n" ""
 printf "\\033[38;5;208m╚══════════════════════════════════════════════════════════════════╝\\033[0m\\n"
+printf "\\n"
+printf "\\033[92mWelcome to HorizonSec!\\033[0m\\n"
+printf "\\n"
+printf "Your system has been configured with:\\n"
+printf "  \\033[38;5;208m•\\033[0m Desktop: {desktop['name']}\\n"
+printf "  \\033[38;5;208m•\\033[0m Terminal: Alacritty\\n"
+printf "  \\033[38;5;208m•\\033[0m Penetration Testing Tools\\n"
+printf "  \\033[38;5;208m•\\033[0m Docker with user permissions\\n"
+printf "  \\033[38;5;208m•\\033[0m Firewall enabled (UFW)\\n"
+printf "  \\033[38;5;208m•\\033[0m Ghost Mode (Tor) enabled\\n"
+printf "\\n"
+printf "\\033[96mManagement Commands:\\033[0m\\n"
+printf "  \\033[38;5;208mhorizon-firewall\\033[0m    - Manage firewall and security\\n"
+printf "  \\033[38;5;208mhorizon-update\\033[0m      - Check for system updates\\n"
+printf "\\n"
+printf "\\033[96mNext steps:\\033[0m\\n"
+printf "  1. Remove installation media\\n"
+printf "  2. Type: \\033[38;5;208mreboot\\033[0m\\n"
+printf "  3. Login as: \\033[38;5;208m{username}\\033[0m\\n"
+printf "  4. Start pentesting!\\n"
+printf "\\n"
 """
 
     return script
