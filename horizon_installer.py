@@ -78,7 +78,7 @@ def logo():
   ║   Professional Penetration Testing Distribution           ║
   ║                                                           ║
   ╚═══════════════════════════════════════════════════════════╝
-            v1.0 - Advanced Security Testing Platform
+            v1.1 - Advanced Security Testing Platform
 {Color.END}""")
 
 def check_root():
